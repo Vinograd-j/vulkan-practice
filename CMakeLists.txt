@@ -3,6 +3,11 @@ project(vulkan_practice)
 
 set(CMAKE_CXX_STANDARD 17)
 
+if (CMAKE_BUILD_TYPE EQUAL "Release")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /ENTRY:mainCRTStartup")
+endif ()
+
 find_package(Vulkan REQUIRED)
 
 include(FetchContent)
@@ -16,5 +21,10 @@ FetchContent_MakeAvailable(glfw)
 
 FetchContent_MakeAvailable(glad)
 
-add_executable(vulkan_practice main.cpp)
-target_link_libraries(vulkan_practice glfw Vulkan::Vulkan)
+if (CMAKE_BUILD_TYPE EQUAL "Release")
+    add_executable(vulkan_practice WIN32 own_realization.cpp)
+else()
+    add_executable(vulkan_practice own_realization.cpp)
+endif ()
+
+target_link_libraries(vulkan_practice glad glfw Vulkan::Vulkan)

@@ -3,7 +3,7 @@ project(vulkan_practice)
 
 set(CMAKE_CXX_STANDARD 17)
 
-if (CMAKE_BUILD_TYPE EQUAL "Release")
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /ENTRY:mainCRTStartup")
 endif ()
@@ -21,7 +21,7 @@ FetchContent_MakeAvailable(glfw)
 
 FetchContent_MakeAvailable(glad)
 
-if (CMAKE_BUILD_TYPE EQUAL "Release")
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
     add_executable(vulkan_practice WIN32 own_realization.cpp)
 else()
     add_executable(vulkan_practice own_realization.cpp)

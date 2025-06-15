@@ -22,9 +22,9 @@ FetchContent_MakeAvailable(glfw)
 FetchContent_MakeAvailable(glad)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_executable(vulkan_practice WIN32 own_realization.cpp)
+    add_executable(vulkan_practice WIN32 summer_realization.cpp)
 else()
-    add_executable(vulkan_practice own_realization.cpp)
+    add_executable(vulkan_practice summer_realization.cpp)
 endif ()
 
 target_link_libraries(vulkan_practice glad glfw Vulkan::Vulkan)

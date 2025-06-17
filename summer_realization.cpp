@@ -97,9 +97,14 @@ struct Vertex
 };
 
 const std::vector<Vertex> vertices = {
-    {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> indices = {
+    0, 1, 2, 2, 3, 0
 };
 
 class TriangleSummer
@@ -160,6 +165,9 @@ private:
     VkBuffer _vertexBuffer {};
     VkDeviceMemory _vertexBufferMemory {};
 
+    VkBuffer _indexBuffer {};
+    VkDeviceMemory _indexBufferMemory {};
+
 private:
 
     void InitWindow()
@@ -192,7 +200,8 @@ private:
         CreateGraphicsPipeline();
         CreateFramebuffers();
         CreateCommandPool();
-        CreateVertexBuffer(_vertexBuffer, _vertexBufferMemory, vertices);
+        CreateVertexBuffer();
+        CreateIndexBuffer();
         CreateCommandBuffers();
         CreateSyncObjects();
     }
@@ -205,6 +214,9 @@ private:
 
         vkDestroyBuffer(_device, _vertexBuffer, nullptr);
         vkFreeMemory(_device, _vertexBufferMemory, nullptr);
+
+        vkDestroyBuffer(_device, _indexBuffer, nullptr);
+        vkFreeMemory(_device, _indexBufferMemory, nullptr);
 
         vkDestroySurfaceKHR(_instance, _surface, nullptr);
 
@@ -725,7 +737,7 @@ private:
         vkBindBufferMemory(_device, buffer, bufferMemory, 0);
     }
 
-    void CreateVertexBuffer(VkBuffer& buffer, VkDeviceMemory& memory, std::vector<Vertex> vertices)
+    void CreateVertexBuffer()
     {
         VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
@@ -741,6 +753,27 @@ private:
         CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _vertexBuffer, _vertexBufferMemory);
 
         CopyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
+
+        vkDestroyBuffer(_device, stagingBuffer, nullptr);
+        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+    }
+
+    void CreateIndexBuffer()
+    {
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, indices.data(), bufferSize);
+        vkUnmapMemory(_device, stagingBufferMemory);
+
+        CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _indexBuffer, _indexBufferMemory);
+
+        CopyBuffer(stagingBuffer, _indexBuffer, bufferSize);
 
         vkDestroyBuffer(_device, stagingBuffer, nullptr);
         vkFreeMemory(_device, stagingBufferMemory, nullptr);
@@ -907,8 +940,9 @@ private:
         VkBuffer vertexBuffers[] = {_vertexBuffer};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-        vkCmdDraw(commandBuffer, vertices.size(), 1, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, indices.size(), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 

@@ -10,7 +10,9 @@
 #include <set>
 #include <vector>
 
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 constexpr int WIDTH = 800;
 constexpr int HEIGHT = 600;
@@ -60,6 +62,13 @@ struct SwapChainSupportDetails
     VkSurfaceCapabilitiesKHR _capabilities;
     std::vector<VkSurfaceFormatKHR> _formats;
     std::vector<VkPresentModeKHR> _presentModes;
+};
+
+struct UniformBufferObject
+{
+    glm::mat4 _model;
+    glm::mat4 _view;
+    glm::mat4 _proj;
 };
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
@@ -146,6 +155,8 @@ private:
     std::vector<VkImageView> _imageViews;
 
     VkRenderPass _renderPass {};
+
+    VkDescriptorSetLayout _descriptorSetLayout {};
     VkPipelineLayout _pipelineLayout {};
 
     VkPipeline _pipeline {};
@@ -167,6 +178,13 @@ private:
 
     VkBuffer _indexBuffer {};
     VkDeviceMemory _indexBufferMemory {};
+
+    std::vector<VkBuffer> _uniformBuffers;
+    std::vector<VkDeviceMemory> _uniformBuffersMemory;
+    std::vector<void*> _uniformBuffersMapped;
+
+    VkDescriptorPool _descriptorPool {};
+    std::vector<VkDescriptorSet> _descriptorSets;
 
 private:
 
@@ -197,20 +215,33 @@ private:
         CreateSwapChain();
         CreateImageViews();
         CreateRenderPass();
+        CreateDescriptorLayout();
         CreateGraphicsPipeline();
         CreateFramebuffers();
         CreateCommandPool();
         CreateVertexBuffer();
         CreateIndexBuffer();
+        CreateUniformBuffers();
+        CreateDescriptorPool();
+        CreateDescriptorSets();
         CreateCommandBuffers();
         CreateSyncObjects();
     }
 
     void CleanUp()
     {
+        CleanupSwapChain();
+
         vkDestroyCommandPool(_device, _commandPool, nullptr);
 
-        CleanupSwapChain();
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
+            vkFreeMemory(_device, _uniformBuffersMemory[i], nullptr);
+        }
+
+        vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
+        vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
 
         vkDestroyBuffer(_device, _vertexBuffer, nullptr);
         vkFreeMemory(_device, _vertexBufferMemory, nullptr);
@@ -290,6 +321,8 @@ private:
             throw std::runtime_error("failed to acquire swap chain image");
         }
 
+        UpdateUniformBuffer(currentFrame);
+
         vkResetFences(_device, 1, &_inFlightFences[currentFrame]);
 
         vkResetCommandBuffer(_commandBuffers[currentFrame], 0);
@@ -337,6 +370,22 @@ private:
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    void UpdateUniformBuffer(uint32_t currentImage)
+    {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        UniformBufferObject ubo {};
+        ubo._model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo._view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo._proj = glm::perspective(glm::radians(45.0f), _swapChainExtent.width / (float) _swapChainExtent.height, 0.1f, 10.0f);
+        ubo._proj[1][1] *= -1;
+
+        memcpy(_uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
     void CreateInstance()
@@ -567,6 +616,24 @@ private:
             throw std::runtime_error("failed to create render pass");
     }
 
+    void CreateDescriptorLayout()
+    {
+        VkDescriptorSetLayoutBinding uboLayoutBinding {};
+        uboLayoutBinding.binding = 0;
+        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboLayoutBinding.descriptorCount = 1;
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutCreateInfo createInfo {};
+        createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        createInfo.bindingCount = 1;
+        createInfo.pBindings = &uboLayoutBinding;
+
+        if (vkCreateDescriptorSetLayout(_device, &createInfo, nullptr, &_descriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error("failed to create descriptor set layout");
+    }
+
     void CreateGraphicsPipeline()
     {
         auto vertShaderCode = readFile("shaders/vert.spv");
@@ -627,7 +694,7 @@ private:
         rasterization.polygonMode = VK_POLYGON_MODE_FILL;
         rasterization.lineWidth = 1.0f;
         rasterization.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rasterization.depthBiasEnable = VK_FALSE;
 
         VkPipelineMultisampleStateCreateInfo multisampling {};
@@ -648,6 +715,8 @@ private:
 
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {};
         pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutCreateInfo.setLayoutCount = 1;
+        pipelineLayoutCreateInfo.pSetLayouts = &_descriptorSetLayout;
 
         if (vkCreatePipelineLayout(_device, &pipelineLayoutCreateInfo, nullptr, &_pipelineLayout) != VK_SUCCESS)
             throw std::runtime_error("failed to create pipeline layout");
@@ -779,6 +848,74 @@ private:
         vkFreeMemory(_device, stagingBufferMemory, nullptr);
     }
 
+    void CreateUniformBuffers()
+    {
+        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        _uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        _uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        _uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _uniformBuffers[i], _uniformBuffersMemory[i]);
+            vkMapMemory(_device, _uniformBuffersMemory[i], 0, bufferSize, 0, &_uniformBuffersMapped[i]);
+        }
+
+    }
+
+    void CreateDescriptorPool()
+    {
+        VkDescriptorPoolSize poolSize {};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+
+        VkDescriptorPoolCreateInfo createInfo {};
+        createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        createInfo.poolSizeCount = 1;
+        createInfo.pPoolSizes = &poolSize;
+        createInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+        if (vkCreateDescriptorPool(_device, &createInfo, nullptr, &_descriptorPool) != VK_SUCCESS)
+            throw std::runtime_error("failed to create descriptor pool!");
+    }
+
+    void CreateDescriptorSets()
+    {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, _descriptorSetLayout);
+
+        VkDescriptorSetAllocateInfo allocInfo {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = _descriptorPool;
+        allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        allocInfo.pSetLayouts = layouts.data();
+
+        _descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        if (vkAllocateDescriptorSets(_device, &allocInfo, _descriptorSets.data()) != VK_SUCCESS)
+            throw std::runtime_error("failed to allocate descriptor sets");
+
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            VkDescriptorBufferInfo bufferInfo {};
+            bufferInfo.buffer = _uniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkWriteDescriptorSet descriptorWrite {};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = _descriptorSets[i];
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pBufferInfo = &bufferInfo;
+            descriptorWrite.pImageInfo = nullptr;
+            descriptorWrite.pTexelBufferView = nullptr;
+
+            vkUpdateDescriptorSets(_device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
     void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
     {
         VkCommandBufferAllocateInfo allocateInfo {};
@@ -896,6 +1033,8 @@ private:
         CreateSwapChain();
         CreateImageViews();
         CreateFramebuffers();
+        CreateUniformBuffers();
+        CreateCommandBuffers();
     }
 
     void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
@@ -942,6 +1081,7 @@ private:
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
         vkCmdBindIndexBuffer(commandBuffer, _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[currentFrame], 0, nullptr);
         vkCmdDrawIndexed(commandBuffer, indices.size(), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);

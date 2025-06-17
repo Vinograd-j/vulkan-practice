@@ -1019,3 +1019,17 @@
 //
 //     return EXIT_SUCCESS;
 // }
+
+int main()
+{
+
+    int* array;
+
+    for (int i = 0; i < 100000000; ++i)
+    {
+        array = new int[i];
+        delete[] array;
+    }
+
+    return 0;
+}
